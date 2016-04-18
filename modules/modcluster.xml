@@ -4,8 +4,12 @@
 <modulenode name="submod"/>
 <modulenode name="foncteurs"/>
 <modulenode name="fstclassmod"/>
+<modulenode name="repr"/>
+<modulenode name="cintf"/>
+
 progmod -> submod ;
 submod -> foncteurs ;
 submod -> fstclassmod ;
+cintf -> repr;
 </env_>
 </dummy_>

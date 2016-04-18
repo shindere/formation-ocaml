@@ -4,13 +4,287 @@ module-name="cintf"
 >
 <contents>
 <section id="preambule" title="Préambule">
-<p>
 
+<subsection id="motiv" title="Motivations">
+
+<p>
+On veut s'interfacer avec d'autres langages pour bénéficier de tout le code
+qui a été écrit dans ces langages. En effet, bien que la tâche
+d'interfaçage soit non triviale, elle peut s'avérer plus simple que la
+réimplémentation des fonctionnalités dont on a besoin.
+D'un autre côté, si l'on est en mesure d'interfacer OCaml avec d''autres
+langages, cela signifie aussi que l'on peut imaginer de remplacer une
+implémentation d'une certaine bibliothèque par une autre écrite en OCaml.
 </p>
+
+</subsection>
+
+<subsection id="principles" title="Principes">
+
+<p>
+Quelle que soit la méthode utilisée pour réaliser l'interface, l'un des
+problèmes à résoudre est celui de la différence de représentation des données
+en mémoire d'un langage à l'autre. Interfacer deux langages consiste donc
+notamment à convertir les données d'une représentation à l'autre. Pour ce
+qui est de la façon dont les données sont représentées en mémoire en OCaml,
+nous renvoyons le lecteur au module <doc href="repr"/> qui est un
+pré-requis pour le présent module.
+</p>
+
+</subsection>
+
+<subsection
+  id="mylib-intro"
+  title="Présentation de la bibliothèque jouet utilisée">
+
+<p>
+Comme nous l'avons indiqué précédemment, l'une des motivations pour
+s'interfacer avec un autre langage (disons C) est de pouvoir profiter d'une
+bibliothèque écrite dans cet autre langage et qui réalise une tâche
+suffisament complexe pour qu'il soit plus facile d'écrire l'interface avec
+la bibliothèque que de réimplémenter la tâche dans le langage auquel on
+s'intéresse (OCaml). Pour illustrer ce point, il était tentant de choisir une
+bibliothèque existante et de montrer comment s'interfacer avec elle. Cette
+approche n'a finalement pas été retenue, d'une part parce qu'elle demande de
+comprendre le fonctionnement de la bibliothèque en plus des méthodes
+d'interfaçage elles-mêmes, d'autre part parce que, par souci de cohérence,
+une bibliothèque s'en tient souvent à un nombre restreint de paradigmes, ce
+qui peut limiter les exemples de styles de programmation rencontrés.
+</p>
+
+
+<p>
+Nous avons donc préféré concevoir une bibliothèque jouet,
+<icode>mylib</icode>. Celle-ci n'introduit aucun concept difficile et on y
+trouvera différentes sortes de fonctions posant différentes sortes de
+problèmes lors de l'interfaçage.
+</p>
+
+<p>
+Nous commençons par compiler cette bibliothèque jouet, de la façon suivante:
+</p>
+
+<run list="true">
+<x>gcc -c -Wall mylib.c</x>
+</run>
+
+<p>
+Remarquons que, pour une bibliothèque réelle, celle-ci serait
+probablement installée sur le système et disponible sous forme de
+bibliothèque partagée (fichier <icode>.so</icode> sous Linux,
+<icode>.dll</icode> sous Windows) ou statique (fichier <icode>.a</icode>
+sous Linux, <icode>.lib</icode> sous Windows). Il faudrait alors passer les
+options appropriées au lieur via les options <icode>-ccopt</icode> et
+
+<icode>-cclib</icode> du compilateur OCaml. Comme on le verra par la
+suite, nous n'aurons cependant pas à
+nous préocupper de ces options pour notre bibliothèque jouet.
+</p>
+
+</subsection>
+
+<subsection id="methods" title="Les différentes méthodes">
+
+<p>
+Nous allons présenter trois approches pour
+rendre <tt>mylib</tt> accessible depuis un programme OCaml:
+</p>
+
+<ul>
+  <li>La méthode traditionnelle décrite dans le manuel OCaml</li>
+  <li>L'utilisation de l'outil swig</li>
+  <li>L'utilisation de l'outil CTypes</li>
+</ul>
+
+</subsection>
+
 </section>
 
-<section id="x" title="X">
-<subsection id="y" title="Y">
+<section id="legacy" title="Interfaçage manuel">
+
+<p>
+Dans cette approche, la conversion entre les représentations en OCaml et en
+C est spécifiée par le programmeur. Pour chaque fonction C que l'on souhaite
+rendre accessible depuis OCaml, on écrit une fonction C d'enrobage qui:
+</p>
+
+<ul>
+  <li>Prend en arguments des données au format OCaml</li>
+  <li>Les convertit à la représentation C</li>
+  <li>Appelle la fonction enrobée sur ces arguments</li>
+  <li>Convertit le résultat de cet appel au format OCaml</li>
+  <li>Retourne ce résultat qui pourra alors être utilisé depuis OCaml</li>
+</ul>
+
+<p>
+Bien sûr, pour pouvoir être appelée depuis un programme OCaml, la fonction
+d'enrobage doit être déclarée et définie, comme nous allons le voir.
+</p>
+
+<subsection
+  id="opening-closing-files"
+  title="Ouverture et fermeture de fichiers">
+
+<p>
+Nous voulons permettre l'utilisation dans un programme OCaml des fonctions
+<icode>mylib_open</icode> et <icode>mylib_close</icode> déclarées
+de la façon suivante dans <icode>mylib.h</icode>:
+</p>
+
+<hcode lang="c"><![CDATA[
+int mylib_open(const char *pathname, int flags);
+void mylib_close(int descriptor);
+]]></hcode>
+
+<p>
+D'après ces déclarations, des types raisonnables pour les fonctions OCaml
+appelant ces fonctions C pourraient être:
+</p>
+
+<ul>
+  <li><icode>mylib_open</icode> : <ml>string -&gt; int -&gt; int</ml></li>
+  <li><icode>mylib_close</icode> : <ml>int -&gt; unit</ml></li>
+</ul>
+
+<p>
+Nous créons donc une interface au module <icode>Mylib1</icode> dans le
+fichier <icode>mylib1.mli</icode>:
+</p>
+
+<ocaml defer_="1"><codefile file="mylib1.mli"/></ocaml>
+
+<p>
+Il nous reste à fournir une implémentation pour ces fonctions.
+Dans la mesure où cette implémentation sera réalisée en C, il nous faut:
+</p>
+
+<ul>
+  <li>Associer aux fonctions <icode>myopen</icode> et <icode>myclose</icode>
+  les fonctions C qui seront effectivement appelées</li>
+  <li>Définir ces fonctions C</li>
+</ul>
+
+<p>
+La première tâche se fait dans le fichier <icode>mylib1.ml</icode>, de la
+façon suivante:
+</p>
+
+<ocaml defer_="1"><codefile file="mylib1.ml"/></ocaml>
+
+<p>
+Come on peut le constater, les noms apparaissant après le mot-clé
+<icode>external</icode> sont ceux des fonctions OCaml que l'on définit,
+tandis que ceux apparaissant entre guillemets sont ceux des fonctions C à
+appeler et qui sont définies dans le fichier <icode>mylib_stubs_1.c</icode>
+de la façon suivante:
+</p>
+
+<hcode lang="c" defer_="1"><codefile file="mylib_stubs_1.c"/></hcode>
+
+<p>
+Après avoir inclus le fichier déclarant les fonctions que nous souhaitons
+rendre accessibles depuis OCaml, nous définissons la macro
+<icode>CAML_NAME_SPACE</icode> qui assure que les fichiers d'en-tête
+de la distribution OCaml ne définissent que des identificateurs commençant
+par <icode>CAML</icode>. Nous incluons ensuite les fichiers d'en-tête
+fournis par la distrubition OCaml et permettant la manipulation de données
+du type C <icode>value</icode>, type utilisé pour représenter toutes les
+données manipulées par OCaml.
+</p>
+
+<p>
+Viennent ensuite les deux fonctions d'enrobage dont nous avons besoin.
+Comme on peut le constater, leurs arguments ainsi que la valeur qu'elles
+renvoient sont de type <icode>value</icode>, ce qui est naturel puisque les
+arguments seront des valeurs OCaml tout comme la valeur renvoyée. En tant
+que tels, arguments et résultat doivent être marqués de façon à être pris en
+compte par le glaneur de cellules ou ramasse-miettes. C'est ce que font les
+macros de la forme <icode>CAMLparamn</icode> et <icode>CAMLreturn</icode>.
+</p>
+
+<p>
+Pour le reste, les deux fonctions d'enrobage font ce que nous avions
+annoncé: elles extraient de leurs arguments des représentations en C (avec
+l'aide des macros fournies par les fichiers d'en-tête de la distribution de
+OCaml), les passent à la fonction enrobée et récupèrent le résultat
+de cet appel (sous la forme d'une donnée en C) puis convertissent ce
+résultat en une valeur de type <icode>value</icode> qui est ensuite
+retournée pour utilisation depuis le programme OCaml appelant. Notons que
+les fonctions d'enrobage ont été écrites de façon à faire apparaître
+clairement chaque étape: extraction des représentations C depuis les
+arguments de type <icode>value</icode>, appel de la fonction enrobée,
+empaquetage du résultat de cet appel dans une valeur de type
+<icode>value</icode>. Il en résulte une fonction plutôt longue mais celle-ci
+pourrait tout à fait être écrite de façon plus concise.
+</p>
+
+<p>
+Nous pouvons maintenant écrire dans le fichier <icode>prog1.ml</icode>
+un programme utilisant les fonctions <icode>mylib_open</icode> et
+<icode>mylib_close</icode>:
+</p>
+
+<ocaml defer_="1"><codefile file="prog1.ml"/></ocaml>
+
+<p>
+Nous compilons le fichier d'enrobage <icode>mylib_stubs_1.c</icode>,
+ainsi que l'interface et l'implémentation du module <icode>Mylib1</icode>:
+</p>
+
+<run list="true">
+<x>ocamlc -c -ccopt -Wall mylib_stubs_1.c</x>
+<x>ocamlc mylib1.mli</x>
+<x>ocamlc -c mylib1.ml</x>
+</run>
+
+<p>
+Finalement, nous compilons, lions et exécutons notre programme d'exemple:
+</p>
+
+<run list="true">
+<x>ocamlc -o prog1.cmo -c prog1.ml</x>
+<x>ocamlc -custom -o prog1 mylib.o mylib_stubs_1.o mylib1.cmo prog1.cmo</x>
+<x>./prog1</x>
+</run>
+
+</subsection>
+
+<subsection id="flags" title="Drapeaux (flags)">
+
+<p>
+Nous supposons que notre fonction <icode>my_open</icode> prend en argument
+des flags (drapeaux) similaires à ceux acceptés par la fonction
+<icode>open</icode> de la bibliothèque C standard, à savoir les drapeaux
+suivants qui sont des constantes entières combinées en un seul arguemnt par
+le biais du ou logique:
+</p>
+
+<ul>
+  <li>Un flag spécifiant le type d'accès demandé, à choisir parmi <icode>O_RDONLY</icode>, <icode>O_WRONLY</icode> ou <icode>O_RDWR</icode>.</li>
+  <li>Une liste éventuellement vide de flags à choisir parmi
+  </li>
+  
+</ul>
+
+</subsection>
+
+<subsection id="structures" title="Structures"></subsection>
+
+<subsection id="union" title="Unions"></subsection>
+
+<subsection id="pointer" title="Pointeurs"></subsection>
+
+<subsection id="allocated" title="Fonction allouant les structures de retour"></subsection>
+
+<subsection id="float" title="Flottants"></subsection>
+
+<subsection id="callbacks" title="Call backs"></subsection>
+
+<subsection id="exceptions" title="Levée d'exceptions"></subsection>
+<subsection id="threads" title="Threads"></subsection>
+</section>
+
+<section id="swig" title="Interfaçage avec Swig">
 <p>
 Un noœud &lt;oc-eval&gt; permet d'évaluer le code OCaml indiqué:
 </p>
@@ -25,7 +299,9 @@ L'attribut <code>defer_="1"</code> permet de reporter d'un cycle
 l'évaluation de la règle &lt;oc-eval&gt;, pour que le contenu
 du fichier soit inséré et ensuite évalué.
 </p>
+<!--
 <oc-eval defer_="1"><codefile file="foo.ml"/></oc-eval>
+-->
 <p>
 Un nœud &lt;run&gt; permet de lancer une commande et intégrer
 sa sortie dans l'arbre. Pratique pour indiquer les commandes
@@ -34,8 +310,16 @@ on compile le document de formation. Les commandes sont
 exécutées dans le répertoires où se trouvent les fichiers
 de codes du module, ici <code>cintf</code>.
 </p>
-<run>pwd ; ls</run>
-</subsection>
+<!-- <run>pwd ; ls</run> -->
+</section>
+
+<section id="ctypes" title="Interfaçage avec CTypes">
+</section>
+
+<section id="conclusion" title="Conclusion">
+</section>
+
+<section id="biblio" title="bibliographie">
 </section>
 
 </contents>
